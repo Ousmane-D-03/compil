@@ -1,0 +1,116 @@
+\documentclass[a4paper,11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+
+\title{Rapport de modifications - compilateur SDM vers MIPS}
+\author{}
+\date{16 avril 2026}
+
+\begin{document}
+\maketitle
+
+\section*{Contexte}
+Le dépôt contient un compilateur pédagogique pour un langage SDM, avec :
+\begin{itemize}
+  \item analyse syntaxique ANTLR (grammaire \texttt{sdm.g4}),
+  \item construction d'un AST, vérification sémantique, traduction en IR,
+  \item génération de code MIPS final.
+\end{itemize}
+
+Ce rapport décrit les travaux effectués sur :
+\begin{enumerate}
+  \item les parties IR dans \texttt{sdmips/ir/translation/Translate.java},
+  \item les parties MIPS dans \texttt{sdmips/mips/Frame.java}, \texttt{sdmips/mips/Expression.java} et \texttt{sdmips/mips/Command.java},
+  \item la sémantique pour les mots réservés et les warnings dans \texttt{sdmips/semantic/TableBuilder.java} et \texttt{sdmips/semantic/TypeChecker.java}.
+\end{enumerate}
+
+\section{Modifications réalisées}
+
+\subsection{Phase IR - \texttt{Translate.java}}
+\begin{itemize}
+  \item Implémentation des expressions SDM en IR : constantes booléennes, entiers, identifiants, appels de fonction, opérations binaires et unaires.
+  \item Gestion des déclarations de variables : création de registres IR locaux et association registre/identifiant dans \texttt{varToReg}.
+  \item Traduction des affectations : compilation de l'expression, puis écriture dans le registre cible.
+  \item Traduction des retours : écriture dans le registre de résultat du frame courant, puis saut vers le label de sortie du frame.
+  \item Traduction de \texttt{if} et \texttt{while} en labels IR et sauts conditionnels/non conditionnels.
+  \item Ajout de la gestion des fragments de fonctions : récupération du frame, traduction du corps et ajout aux fragments de sortie.
+\end{itemize}
+
+\subsection{Génération MIPS}
+\paragraph{\texttt{mips/Frame.java}}
+\begin{itemize}
+  \item Allocation des registres IR sur la pile par offsets.
+  \item Génération du prologue de fonction : sauvegarde de \$ra et \$fp, ajustement de \$sp, initialisation de \$fp, stockage des paramètres.
+  \item Génération du corps de fonction avec visiteur \texttt{mips.Command}.
+  \item Génération de l'épilogue : restauration de la valeur de retour en \$v0, récupération de \$ra et \$fp, saut de retour.
+\end{itemize}
+
+\paragraph{\texttt{mips/Expression.java}}
+\begin{itemize}
+  \item Implémentation de \texttt{ReadReg} : lecture à partir de l'adresse calculée pour le registre associé.
+  \item Compilation des opérations binaires : empilement des deux opérandes, exécution de l'opération MIPS et repousse du résultat.
+\end{itemize}
+
+\paragraph{\texttt{mips/Command.java}}
+\begin{itemize}
+  \item \texttt{WriteReg} : compilation de l'expression, dépilage dans \$t0, puis stockage à l'offset approprié de \$fp.
+  \item \texttt{CJump} : génération de \texttt{beq} vers le label faux et saut vers le label vrai.
+  \item \texttt{FunCall} : passage des arguments dans \$a0...\$a3, appel \texttt{jal}, puis stockage du résultat de \$v0 dans le registre temporaire de destination.
+\end{itemize}
+
+\subsection{Sémantique - mots réservés et warnings}
+\paragraph{\texttt{sdmips/semantic/TableBuilder.java}}
+\begin{itemize}
+  \item Ajout d'un ensemble de mots réservés : \texttt{int, boolean, if, else, while, for, print, return, read, main, true, false}.
+  \item Vérification des identificateurs réservés dans :
+    \begin{itemize}
+      \item déclarations de variables locales,
+      \item déclarations de méthodes,
+      \item paramètres formels.
+    \end{itemize}
+  \item En cas d'utilisation d'un mot réservé comme identificateur, une erreur sémantique est ajoutée et la compilation continue jusqu'à la fin de l'analyse de la table.
+\end{itemize}
+
+\paragraph{\texttt{sdmips/semantic/TypeChecker.java}}
+\begin{itemize}
+  \item Ajout d'un objet distinct pour les warnings, séparé des erreurs fatales.
+  \item La méthode \texttt{check()} affiche d'abord les warnings, puis les erreurs.
+  \item Les warnings ne stoppent pas la compilation ; seules les erreurs provoquent une sortie.
+  \item Conversion de l'instruction "inatteignable" en warning via \texttt{checkReach(Node)}.
+\end{itemize}
+
+\section{Choix techniques et motivations}
+\begin{itemize}
+  \item Le traitement des mots réservés repose sur un ensemble explicite pour rester simple et directement lié à la grammaire SDM.
+  \item La séparation erreurs/warnings vise à respecter le comportement attendu d'un compilateur pédagogique : signaler les problèmes non bloquants sans interrompre automatiquement le flux.
+  \item La génération MIPS est restée simple : on alloue tous les registres IR sur la pile, sans faire d'allocation de registres MIPS complexes.
+  \item Les commentaires du professeur ont été maintenus dans le code existant ; les modifications se limitent à l'ajout de logique sans supprimer les annotations pédagogiques.
+\end{itemize}
+
+\section{Erreurs rencontrées et corrections}
+\begin{enumerate}[label=\arabic*)]
+  \item \textbf{Conflit de nom de variable dans \texttt{TableBuilder.java}} : une variable \texttt{id} était déclarée deux fois dans le même bloc de méthode. Correctif : renommage de la première occurrence en \texttt{methodName}.
+  \item \textbf{Compilation incomplète du module sémantique} : le premier test incluait \texttt{AstBuild.java}, qui dépend de classes parser/ANTLR non disponibles dans l'environnement de vérification. Correctif : exclusion de \texttt{AstBuild.java} lors de la compilation ciblée, ce qui permet de valider indépendamment la logique sémantique.
+  \item \textbf{Conflit de type \texttt{Byte}} dans \texttt{Translate.java} : la classe \texttt{java.lang.Byte} entrait en collision avec \texttt{ir.expr.Byte}. Correctif : utilisation du nom de classe qualifié \texttt{ir.expr.Byte} dans la traduction IR.
+  \item \textbf{Absence de gestion des warnings} : le code original déclarait explicitement un TODO pour les warnings dans \texttt{TypeChecker.java}. Correctif : ajout d'un second objet \texttt{Errors} pour les warnings, et affichage des avertissements sans interrompre la compilation.
+\end{enumerate}
+
+\section{Fichiers modifiés}
+\begin{itemize}
+  \item \texttt{sdmips/ir/translation/Translate.java}
+  \item \texttt{sdmips/mips/Frame.java}
+  \item \texttt{sdmips/mips/Expression.java}
+  \item \texttt{sdmips/mips/Command.java}
+  \item \texttt{sdmips/semantic/TableBuilder.java}
+  \item \texttt{sdmips/semantic/TypeChecker.java}
+\end{itemize}
+
+\section{Validation}
+Une compilation ciblée a été effectuée avec les fichiers modifiés et les fichiers AST nécessaires, hors \texttt{AstBuild.java} dépendant de ANTLR/parser qui n'est pas disponible dans l'environnement de vérification. Le module sémantique compile correctement après correction.
+
+\end{document}
