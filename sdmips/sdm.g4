@@ -36,17 +36,34 @@ statement : '{' statement* '}'					#statList
 	|type Id '=' exp ';'					#statVarDeclAff
 ;
 
-exp : exp op=('&&' |'<' |'>'|'!='|'/'| '+' | '-' |'*'|'=='|'+='|'||'|'<='|'>=') exp	#exBinop
-	|op=('!'|'-') exp								#exUnop
-	|Int										#exInt	
-	|'true'										#exTrue
-	|'false'									#exFalse	
-	|Id										#exId
-	|'(' exp ')'									#exParenthesis
-	|Id '(' (exp (',' exp)*)?  ')'							#exCall
-	|exp '[' exp ']'							#exTabElt
-	|'new' type '[' exp ']'		#exNewTab
-	|'read' '(' ')'									#exRead
+exp : logicOrExp;
+
+logicOrExp : logicAndExp ( '||' logicAndExp )* ;
+
+logicAndExp : equalityExp ( '&&' equalityExp )* ;
+
+equalityExp : relationalExp ( ( '==' | '!=' ) relationalExp )* ;
+
+relationalExp : addExp ( ( '<' | '>' | '<=' | '>=' ) addExp )* ;
+
+addExp : mulExp ( ( '+' | '-' ) mulExp )* ;
+
+mulExp : unaryExp ( ( '*' | '/' ) unaryExp )* ;
+
+unaryExp : op=('!'|'-') unaryExp #exUnop
+	|postfixExp #exPostfix
+;
+
+postfixExp : primaryExp ( '[' exp ']' )* ;
+
+primaryExp : Int #exInt
+	|'true' #exTrue
+	|'false' #exFalse
+	|Id '(' (exp (',' exp)*)?  ')' #exCall
+	|Id #exId
+	|'(' exp ')' #exParenthesis
+	|'new' type '[' exp ']' #exNewTab
+	|'read' '(' ')' #exRead
 ;
 
 

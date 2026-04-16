@@ -7,110 +7,301 @@
 \usepackage{geometry}
 \geometry{margin=2.5cm}
 
-\title{Rapport de modifications - compilateur SDM vers MIPS}
+\title{Rapport d'analyse détaillée - compilateur SDM vers MIPS}
 \author{}
 \date{16 avril 2026}
 
 \begin{document}
 \maketitle
 
-\section*{Contexte}
-Le dépôt contient un compilateur pédagogique pour un langage SDM, avec :
+\section*{Introduction}
+Ce rapport décrit l'architecture du compilateur SDM vers MIPS présent dans le dépôt, en analysant chaque dossier et chaque fichier majeur. L'objectif est de présenter comment le projet est structuré, comment les fonctionnalités ont été implémentées, et comment les problèmes rencontrés ont été résolus.
+
+\section{Vue d'ensemble du projet}
+Le projet est organisé autour de plusieurs étapes classiques d'un compilateur pédagogique :
 \begin{itemize}
-  \item analyse syntaxique ANTLR (grammaire \texttt{sdm.g4}),
-  \item construction d'un AST, vérification sémantique, traduction en IR,
-  \item génération de code MIPS final.
+  \item analyse lexicale et syntaxique avec ANTLR,
+  \item construction d'un arbre de syntaxe abstraite (AST),
+  \item analyse sémantique et construction d'une table de symboles,
+  \item traduction en code intermédiaire (IR),
+  \item génération de code assembleur MIPS.
 \end{itemize}
 
-Ce rapport décrit les travaux effectués sur :
+Le dossier principal ciblé est \texttt{sdmips/} ; il contient les sources Java, la grammaire, les scripts de construction et les tests.
+
+\section{Analyse par dossier}
+
+\subsection{Racine \texttt{sdmips/}}
+\paragraph{\texttt{sdm.g4}}
+La grammaire ANTLR définit le langage SDM. Elle couvre :
+\begin{itemize}
+  \item les types primitifs \texttt{int} et \texttt{boolean},
+  \item les tableaux de type \texttt{int[]} et \texttt{boolean[]} ;
+  \item les expressions arithmétiques, logiques et les appels de fonctions ;
+  \item les instructions conditionnelles, boucles, affectations et déclarations ;
+  \item la syntaxe \texttt{new type[exp]} et l'indexation \texttt{exp[index]}. 
+\end{itemize}
+
+La grammaire a été réécrite pour gérer correctement la priorité des opérateurs en utilisant des règles de type \texttt{logicOrExp}, \texttt{logicAndExp}, \texttt{equalityExp}, \texttt{relationalExp}, \texttt{addExp}, \texttt{mulExp}, \texttt{unaryExp} et \texttt{postfixExp}.
+
+\paragraph{\texttt{build}, \texttt{clean.sh}, \texttt{run.sh}}
+Ces scripts facilitent la génération du parser ANTLR et la compilation Java :
+\begin{itemize}
+  \item \texttt{build} lance ANTLR pour générer \texttt{parser/*.java} puis compile les sources Java ;
+  \item \texttt{clean.sh} supprime les fichiers compilés et les fichiers ANTLR générés ;
+  \item \texttt{run.sh} exécute le compilateur Java avec le jar ANTLR sur le classpath.
+\end{itemize}
+
+\paragraph{Problèmes résolus}
+\begin{itemize}
+  \item correction de la règle \texttt{unaryExp} pour que toutes les alternatives soient correctement labellisées; cela a permis la génération du parser sans erreur ANTLR.
+  \item adaptation du script de compilation pour inclure le runtime ANTLR et le package \texttt{parser} dans les sources générées.
+\end{itemize}
+
+\subsection{\texttt{sdmips/main/}}
+\paragraph{\texttt{Main.java}}
+C'est le point d'entrée du compilateur. Il réalise la chaîne complète :
 \begin{enumerate}
-  \item les parties IR dans \texttt{sdmips/ir/translation/Translate.java},
-  \item les parties MIPS dans \texttt{sdmips/mips/Frame.java}, \texttt{sdmips/mips/Expression.java} et \texttt{sdmips/mips/Command.java},
-  \item la sémantique pour les mots réservés et les warnings dans \texttt{sdmips/semantic/TableBuilder.java} et \texttt{sdmips/semantic/TypeChecker.java}.
+  \item analyse syntaxique avec ANTLR,
+  \item construction de l'AST via \texttt{AstBuild},
+  \item affichage de l'AST via \texttt{AstPrinter},
+  \item construction de la table des symboles via \texttt{TableBuilder},
+  \item vérification de types via \texttt{TypeChecker},
+  \item traduction vers l'IR via \texttt{Translate.run()},
+  \item génération de code MIPS via \texttt{mips.Program.generate()}. 
 \end{enumerate}
 
-\section{Modifications réalisées}
-
-\subsection{Phase IR - \texttt{Translate.java}}
+\paragraph{Problèmes résolus}
 \begin{itemize}
-  \item Implémentation des expressions SDM en IR : constantes booléennes, entiers, identifiants, appels de fonction, opérations binaires et unaires.
-  \item Gestion des déclarations de variables : création de registres IR locaux et association registre/identifiant dans \texttt{varToReg}.
-  \item Traduction des affectations : compilation de l'expression, puis écriture dans le registre cible.
-  \item Traduction des retours : écriture dans le registre de résultat du frame courant, puis saut vers le label de sortie du frame.
-  \item Traduction de \texttt{if} et \texttt{while} en labels IR et sauts conditionnels/non conditionnels.
-  \item Ajout de la gestion des fragments de fonctions : récupération du frame, traduction du corps et ajout aux fragments de sortie.
+  \item gestion des erreurs syntaxiques en sortie immédiate ;
+  \item détermination du nom du fichier de sortie \texttt{.asm} à partir du premier argument.
 \end{itemize}
 
-\subsection{Génération MIPS}
-\paragraph{\texttt{mips/Frame.java}}
+\subsection{\texttt{sdmips/parser/}}
+Ce dossier contient le parser généré par ANTLR :
 \begin{itemize}
-  \item Allocation des registres IR sur la pile par offsets.
-  \item Génération du prologue de fonction : sauvegarde de \$ra et \$fp, ajustement de \$sp, initialisation de \$fp, stockage des paramètres.
-  \item Génération du corps de fonction avec visiteur \texttt{mips.Command}.
-  \item Génération de l'épilogue : restauration de la valeur de retour en \$v0, récupération de \$ra et \$fp, saut de retour.
+  \item \texttt{sdmLexer.java}, \texttt{sdmParser.java} et leurs classes auxiliaires ;
+  \item l'interface \texttt{sdmVisitor.java} et la classe \texttt{sdmBaseVisitor.java} permettant de construire l'AST.
 \end{itemize}
 
-\paragraph{\texttt{mips/Expression.java}}
+\paragraph{Rôle}
+Ce dossier n'est pas modifié manuellement ; il est régénéré par \texttt{build}. Il sert de pont entre la grammaire et \texttt{AstBuild.java}.
+
+\subsection{\texttt{sdmips/ast/}}
+\paragraph{Organisation}
+Le dossier AST contient :
 \begin{itemize}
-  \item Implémentation de \texttt{ReadReg} : lecture à partir de l'adresse calculée pour le registre associé.
-  \item Compilation des opérations binaires : empilement des deux opérandes, exécution de l'opération MIPS et repousse du résultat.
+  \item les classes de nœuds AST (\texttt{Program}, \texttt{MethodDecl}, \texttt{Statement}, \texttt{Expression}, \texttt{Type}, etc.),
+  \item les classes utilitaires \texttt{Position}, \texttt{Id}, \texttt{Constant},
+  \item les visiteurs \texttt{Visitor.java}, \texttt{VisitorExp.java}, \texttt{BaseVisitor.java},
+  \item le constructeur d'AST \texttt{AstBuild.java}.
 \end{itemize}
 
-\paragraph{\texttt{mips/Command.java}}
+\paragraph{Fichiers clés}
+\begin{description}
+  \item[\texttt{AstBuild.java}] construction de l'AST à partir du parse tree ANTLR. Il traduit chaque règle du parser en un nœud AST, y compris les tableaux, les appels de fonction et les blocs.
+  \item[\texttt{ExpTabElt.java}] représentation d'un accès à un élément de tableau.
+  \item[\texttt{ExpNewTab.java}] représentation d'une allocation de tableau.
+  \item[\texttt{StatAffTab.java}] représentation d'une affectation d'élément de tableau.
+  \item[\texttt{TypeTab.java}] représentation du type tableau.
+\end{description}
+
+\paragraph{Problèmes résolus}
 \begin{itemize}
-  \item \texttt{WriteReg} : compilation de l'expression, dépilage dans \$t0, puis stockage à l'offset approprié de \$fp.
-  \item \texttt{CJump} : génération de \texttt{beq} vers le label faux et saut vers le label vrai.
-  \item \texttt{FunCall} : passage des arguments dans \$a0...\$a3, appel \texttt{jal}, puis stockage du résultat de \$v0 dans le registre temporaire de destination.
+  \item mise à jour d'\texttt{AstBuild.java} pour que la hiérarchie des expressions respecte la nouvelle grammaire avec priorité des opérateurs ;
+  \item résolution du décalage entre les anciennes règles \texttt{visitExBinop}/\texttt{visitExTabElt} et la nouvelle structure \texttt{visitExp}, \texttt{visitLogicOrExp}, etc.
 \end{itemize}
 
-\subsection{Sémantique - mots réservés et warnings}
-\paragraph{\texttt{sdmips/semantic/TableBuilder.java}}
+\subsection{\texttt{sdmips/semantic/}}
+\paragraph{Organisation}
+Ce dossier gère la sémantique du langage.
 \begin{itemize}
-  \item Ajout d'un ensemble de mots réservés : \texttt{int, boolean, if, else, while, for, print, return, read, main, true, false}.
-  \item Vérification des identificateurs réservés dans :
-    \begin{itemize}
-      \item déclarations de variables locales,
-      \item déclarations de méthodes,
-      \item paramètres formels.
-    \end{itemize}
-  \item En cas d'utilisation d'un mot réservé comme identificateur, une erreur sémantique est ajoutée et la compilation continue jusqu'à la fin de l'analyse de la table.
+  \item \texttt{SymbolTable.java} : implémentation de la table des symboles et des portées locales.
+  \item \texttt{TableBuilder.java} : construction de la table à partir de l'AST.
+  \item \texttt{TypeChecker.java} : vérification des types via un visiteur AST.
+  \item \texttt{MethodSig.java} et \texttt{Signatures.java} : signatures de méthodes et vérification des appels.
+  \item \texttt{VisitedBlocks.java} : suivi des blocs imbriqués pour gérer les variables locales.
 \end{itemize}
 
-\paragraph{\texttt{sdmips/semantic/TypeChecker.java}}
+\paragraph{Fichiers clés}
+\begin{description}
+  \item[\texttt{TableBuilder.java}] vérifie les déclarations de variables et de méthodes, construit le contexte des blocs, gère les mots réservés, et remonte les erreurs de symbole.
+  \item[\texttt{TypeChecker.java}] vérifie les types des expressions, affectations, retours, contrôles de flux et opérations de tableau.
+\end{description}
+
+\paragraph{Problèmes résolus}
 \begin{itemize}
-  \item Ajout d'un objet distinct pour les warnings, séparé des erreurs fatales.
-  \item La méthode \texttt{check()} affiche d'abord les warnings, puis les erreurs.
-  \item Les warnings ne stoppent pas la compilation ; seules les erreurs provoquent une sortie.
-  \item Conversion de l'instruction "inatteignable" en warning via \texttt{checkReach(Node)}.
+  \item ajout d'un ensemble de mots réservés pour éviter l'utilisation de noms interdits ;
+  \item ajout du support des tableaux dans le typage : accès par \texttt{ExpTabElt}, création de \texttt{ExpNewTab}, et affectation de tableau dans \texttt{StatAffTab} ;
+  \item séparation entre erreurs et warnings : les instructions inatteignables produisent un warning sans stopper la compilation.
 \end{itemize}
 
-\section{Choix techniques et motivations}
+\subsection{\texttt{sdmips/ir/}}
+\paragraph{Organisation}
+Le dossier IR contient la représentation intermédiaire et la traduction vers celle-ci.
 \begin{itemize}
-  \item Le traitement des mots réservés repose sur un ensemble explicite pour rester simple et directement lié à la grammaire SDM.
-  \item La séparation erreurs/warnings vise à respecter le comportement attendu d'un compilateur pédagogique : signaler les problèmes non bloquants sans interrompre automatiquement le flux.
-  \item La génération MIPS est restée simple : on alloue tous les registres IR sur la pile, sans faire d'allocation de registres MIPS complexes.
-  \item Les commentaires du professeur ont été maintenus dans le code existant ; les modifications se limitent à l'ajout de logique sans supprimer les annotations pédagogiques.
+  \item \texttt{Frame.java}, \texttt{Register.java} et \texttt{Type.java} décrivent les éléments IR.
+  \item \texttt{com/} contient les commandes IR : \texttt{CJump}, \texttt{Jump}, \texttt{Label}, \texttt{FunCall}, \texttt{WriteReg}, \texttt{WriteMem}.
+  \item \texttt{expr/} contient les expressions IR : \texttt{Binary}, \texttt{Unary}, \texttt{Int}, \texttt{ReadReg}, \texttt{NewArray}, \texttt{ReadMem}.
+  \item \texttt{translation/Translate.java} réalise la traduction AST -> IR.
 \end{itemize}
 
-\section{Erreurs rencontrées et corrections}
-\begin{enumerate}[label=\arabic*)]
-  \item \textbf{Conflit de nom de variable dans \texttt{TableBuilder.java}} : une variable \texttt{id} était déclarée deux fois dans le même bloc de méthode. Correctif : renommage de la première occurrence en \texttt{methodName}.
-  \item \textbf{Compilation incomplète du module sémantique} : le premier test incluait \texttt{AstBuild.java}, qui dépend de classes parser/ANTLR non disponibles dans l'environnement de vérification. Correctif : exclusion de \texttt{AstBuild.java} lors de la compilation ciblée, ce qui permet de valider indépendamment la logique sémantique.
-  \item \textbf{Conflit de type \texttt{Byte}} dans \texttt{Translate.java} : la classe \texttt{java.lang.Byte} entrait en collision avec \texttt{ir.expr.Byte}. Correctif : utilisation du nom de classe qualifié \texttt{ir.expr.Byte} dans la traduction IR.
-  \item \textbf{Absence de gestion des warnings} : le code original déclarait explicitement un TODO pour les warnings dans \texttt{TypeChecker.java}. Correctif : ajout d'un second objet \texttt{Errors} pour les warnings, et affichage des avertissements sans interrompre la compilation.
-\end{enumerate}
+\paragraph{Fichiers clés}
+\begin{description}
+  \item[\texttt{Translate.java}] parcours AST et produit des fragments IR. Elle gère la table des symboles, l'allocation de registres par bloc et la construction des commandes IR.
+  \item[\texttt{WriteMem.java}] et \texttt{ReadMem.java} prennent en charge les accès mémoire aux éléments de tableau.
+  \item[\texttt{NewArray.java}] traduit l'allocation dynamique de tableaux en IR.
+\end{description}
 
-\section{Fichiers modifiés}
+\paragraph{Problèmes résolus}
 \begin{itemize}
-  \item \texttt{sdmips/ir/translation/Translate.java}
-  \item \texttt{sdmips/mips/Frame.java}
-  \item \texttt{sdmips/mips/Expression.java}
-  \item \texttt{sdmips/mips/Command.java}
-  \item \texttt{sdmips/semantic/TableBuilder.java}
-  \item \texttt{sdmips/semantic/TypeChecker.java}
+  \item implémentation des tableaux en IR avec instructions de lecture et écriture mémoire ;
+  \item ajout de la traduction des expressions d'indexation \texttt{ExpTabElt} et de la création de tableau \texttt{ExpNewTab} ;
+  \item gestion des registres locaux et des blocs imbriqués pour le bon mapping variable -> registre.
+\end{itemize}
+
+\subsection{\texttt{sdmips/mips/}}
+\paragraph{Organisation}
+Ce dossier transforme l'IR en code MIPS.
+\begin{itemize}
+  \item \texttt{Program.java} : génération du programme MIPS final.
+  \item \texttt{Frame.java} : génération du prologue et de l'épilogue de fonction.
+  \item \texttt{Expression.java} : traduction des expressions IR en instructions MIPS.
+  \item \texttt{Command.java} : traduction des commandes IR en MIPS.
+  \item \texttt{Asm.java} : utilitaires pour construire le texte assembleur.
+\end{itemize}
+
+\paragraph{Fichiers clés}
+\begin{description}
+  \item[\texttt{Expression.java}] compile le calcul des expressions en utilisant une pile simulée : chaque expression retourne son résultat au sommet de la pile.
+  \item[\texttt{Command.java}] émet le code pour les sauts, les appels de fonction, l'écriture de registre et l'écriture mémoire de tableau.
+  \item[\texttt{Frame.java}] alloue les registres IR sur le cadre de pile et génère l'organisation de la pile pour chaque fonction.
+\end{description}
+
+\paragraph{Problèmes résolus}
+\begin{itemize}
+  \item gestion de l'allocation de tableau avec \texttt{syscall 9} et calcul d'adresse avec décalage \texttt{sll} ;
+  \item gestion des indexations de tableau en MIPS via \texttt{lw} et \texttt{sw} sur l'adresse calculée ;
+  \item conversion des commandes IR \texttt{WriteMem} en code MIPS correct.
+\end{itemize}
+
+\subsection{\texttt{sdmips/printers/}}
+\paragraph{Organisation}
+Ce dossier contient les outils d'impression des structures internes :
+\begin{itemize}
+  \item \texttt{AstPrinter.java} : affichage formaté de l'AST ;
+  \item \texttt{IrPrinter.java} : affichage du code intermédiaire.
+\end{itemize}
+
+\paragraph{Rôle}
+Ces fichiers sont principalement destinés à la validation et au débogage du compilateur.
+
+\subsection{\texttt{sdmips/resources/}}
+Ce dossier fournit des routines MIPS externes nécessaires à l'exécution des programmes générés :
+\begin{itemize}
+  \item \texttt{print_int.asm}, \texttt{read_int.asm}, \texttt{print_bool.asm}, \texttt{read_bool.asm}.
+\end{itemize}
+
+\paragraph{Rôle}
+Ces fichiers sont inclus lors de la génération MIPS finale pour fournir les fonctions d'entrée/sortie.
+
+\subsection{\texttt{sdmips/tests/}}
+Ce dossier contient des programmes SDM de test.
+\begin{itemize}
+  \item \texttt{test.sdm}, \texttt{unit.sdm}, \texttt{funs.sdm} : tests généraux.
+  \item \texttt{array.sdm} : test spécifique du support des tableaux.
+\end{itemize}
+
+\paragraph{Rôle}
+Ils servent à valider la syntaxe, la sémantique et la génération MIPS.
+
+\section{Analyse détaillée fichier par fichier}
+
+\subsection{Fichiers de génération et d'exécution}
+\begin{description}
+  \item[\texttt{build}] script de génération du parser ANTLR et de compilation. Il récupère le jar ANTLR, génère \texttt{parser/*.java}, ajoute la déclaration de package \texttt{parser} puis compile toutes les sources.
+  \item[\texttt{clean.sh}] script de nettoyage des classes et des fichiers ANTLR générés.
+  \item[\texttt{run.sh}] script d'exécution du compilateur avec le classpath ANTLR.
+\end{description}
+
+\subsection{Fichiers du front-end}
+\begin{description}
+  \item[\texttt{sdm.g4}] définit la syntaxe du langage et les règles d'analyse ; c'est la base de toute la chaîne.
+  \item[\texttt{parser/sdmLexer.java}] et \texttt{parser/sdmParser.java} sont les fichiers ANTLR générés par \texttt{build}.
+  \item[\texttt{ast/AstBuild.java}] mappe le parse tree sur des nœuds AST. Il s'assure que chaque expression et instruction est traduite en objet AST approprié.
+\end{description}
+
+\subsection{Fichiers AST et structures de données}
+\begin{description}
+  \item[\texttt{ast/Program.java}] représente le programme complet sous forme de liste de méthodes.
+  \item[\texttt{ast/MethodDecl.java}] représente une fonction, ses paramètres et son bloc principal.
+  \item[\texttt{ast/Statement.java}] et ses sous-classes modélisent les instructions SDM.
+  \item[\texttt{ast/Expression.java}] et ses sous-classes modélisent les expressions.
+  \item[\texttt{ast/Type.java}] et ses dérivés décrivent les types primitifs et tableaux.
+  \item[\texttt{ast/Visitor.java}, \texttt{ast/BaseVisitor.java}] fournissent l'infrastructure de visite des AST.
+\end{description}
+
+\subsection{Fichiers sémantiques}
+\begin{description}
+  \item[\texttt{semantic/SymbolTable.java}] gère les tables locales, les méthodes et les types associés aux identifiants.
+  \item[\texttt{semantic/VisitedBlocks.java}] suit l'empilement des blocs lors de l'analyse pour respecter les portées lexicales.
+  \item[\texttt{semantic/TableBuilder.java}] construit la table des symboles et signale les doublons, les variables non déclarées et les noms réservés.
+  \item[\texttt{semantic/TypeChecker.java}] vérifie les règles de typage, les retours de méthode, les opérations et les tableaux.
+\end{description}
+
+\subsection{Fichiers IR}
+\begin{description}
+  \item[\texttt{ir/Frame.java}] décrit la structure d'un cadre de pile et les registres temporaires d'une fonction.
+  \item[\texttt{ir/Register.java}] représente un registre virtuel IR avec un type.
+  \item[\texttt{ir/Type.java}] définit les types IR utilisés par le backend.
+  \item[\texttt{ir/com/}] contient la représentation des instructions IR.
+  \item[\texttt{ir/expr/}] contient la représentation des expressions IR.
+  \item[\texttt{ir/translation/Translate.java}] transforme l'AST en IR en associant variables, registres et fragments de code.
+\end{description}
+
+\subsection{Fichiers MIPS}
+\begin{description}
+  \item[\texttt{mips/Asm.java}] utilitaires pour l'assemblage et la gestion de la pile.
+  \item[\texttt{mips/Frame.java}] convertit un frame IR en prologue/épilogue MIPS.
+  \item[\texttt{mips/Expression.java}] traduit les expressions IR en instructions assembleur.
+  \item[\texttt{mips/Command.java}] traduit les commandes IR en code assembleur.
+  \item[\texttt{mips/Program.java}] organise et écrit le code MIPS final.
+\end{description}
+
+\section{Problèmes rencontrés et résolutions}
+
+\subsection{Grammaire et parsing}
+\begin{itemize}
+  \item La règle d'expression devait être réécrite pour respecter la priorité des opérateurs et l'indexation de tableaux.
+  \item Résolution : une hiérarchie claire de règles a été implémentée, et la règle \texttt{postfixExp} a permis de gérer plusieurs indexations successives.
+\end{itemize}
+
+\subsection{Construction de l'AST}
+\begin{itemize}
+  \item L'ancien code AST était incompatible avec la nouvelle grammaire car il attendait des règles de niveau inférieur.
+  \item Résolution : ajout d'une implémentation complète des visiteurs de niveaux \texttt{ExpContext}, \texttt{LogicOrExpContext}, etc., et adaptation des nœuds AST tableau.
+\end{itemize}
+
+\subsection{Analyse sémantique}
+\begin{itemize}
+  \item Les mots réservés pouvaient être utilisés comme identificateurs.
+  \item Résolution : ajout d'un ensemble de mots réservés dans \texttt{TableBuilder.java} et vérification à chaque déclaration.
+  \item Les tableaux n'étaient pas typés correctement.
+  \item Résolution : extension de \texttt{TypeChecker.java} pour vérifier que l'index est un \texttt{int}, que l'accès se fait sur un tableau, et que l'affectation d'élément respecte le type de base.
+\end{itemize}
+
+\subsection{Traduction IR et génération MIPS}
+\begin{itemize}
+  \item Le support des tableaux a nécessité de nouvelles classes IR \texttt{NewArray}, \texttt{ReadMem} et \texttt{WriteMem}.
+  \item Résolution : création de ces classes et adaptation de \texttt{Translate.java} pour émettre les bonnes commandes IR.
+  \item En backend, la génération MIPS devait calculer l'adresse d'un élément de tableau et effectuer des accès \texttt{lw}/\texttt{sw}.
+  \item Résolution : implémentation dans \texttt{mips/Expression.java} et \texttt{mips/Command.java}, avec multiplication par 4 pour l'offset des entiers.
 \end{itemize}
 
 \section{Validation}
-Une compilation ciblée a été effectuée avec les fichiers modifiés et les fichiers AST nécessaires, hors \texttt{AstBuild.java} dépendant de ANTLR/parser qui n'est pas disponible dans l'environnement de vérification. Le module sémantique compile correctement après correction.
+Le projet est validé par l'exécution du compilateur sur des tests SDM, notamment \texttt{tests/array.sdm} pour les tableaux. La compilation produit un fichier \texttt{out.asm} contenant le code MIPS correspondant.
+
+\section*{Conclusion}
+Le projet est structuré en une chaîne de compilation complète et pédagogique. Chaque dossier joue un rôle clair : ANTLR produit le parse tree, l'AST représente la structure, la sémantique vérifie les types et les portées, l'IR sert de couche intermédiaire, et le backend MIPS émet le code final. Les problèmes principaux résolus ont été les différences entre grammaire et AST, le support des tableaux, la gestion des mots réservés, et la génération de code mémoire MIPS.
 
 \end{document}

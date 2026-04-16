@@ -36,10 +36,10 @@ public class AstBuild extends parser.sdmBaseVisitor<Node> implements parser.sdmV
 	}
 
 	@Override public Node visitStatAffTab(sdmParser.StatAffTabContext ctx){
-		Id id = new Id(position(ctx), ctx.Id().getText());
+		Expression tab = new ExpId(position(ctx), ctx.Id().getText());
 		Expression index = (Expression)visit(ctx.exp(0));
 		Expression value = (Expression)visit(ctx.exp(1));
-		return new StatAffTab(position(ctx), new ExpTabElt(position(ctx), id, index), value);
+		return new StatAffTab(position(ctx), new ExpTabElt(position(ctx), tab, index), value);
 	}
 
 	@Override public Node visitStatVarDecl(sdmParser.StatVarDeclContext ctx){
@@ -196,16 +196,11 @@ public class AstBuild extends parser.sdmBaseVisitor<Node> implements parser.sdmV
 	@Override public Node visitExCall(sdmParser.ExCallContext ctx) {
 		Id method = new Id(position(ctx),ctx.Id().getText());
 		List<Expression> args = new ArrayList<>();
-		for(ExpContext ec : ctx.exp()){
+		for(sdmParser.ExpContext ec : ctx.exp()){
 			args.add((Expression)visit(ec));
 		}
 
 		return new ExpCallMethod(position(ctx),method,args); 
-	}
-	@Override public Node visitExTabElt(sdmParser.ExTabEltContext ctx) {
-		Expression tab = (Expression)visit(ctx.exp(0));
-		Expression index = (Expression)visit(ctx.exp(1));
-		return new ExpTabElt(position(ctx), tab, index);
 	}
 	@Override public Node visitExNewTab(sdmParser.ExNewTabContext ctx) {
 		Type type = (Type)visit(ctx.type());
@@ -220,30 +215,81 @@ public class AstBuild extends parser.sdmBaseVisitor<Node> implements parser.sdmV
 		return new ExpRead(position(ctx));
 	}
 
-
-	@Override public Node visitExBinop(sdmParser.ExBinopContext ctx) {
-		Expression exp1=(Expression)visit(ctx.exp(0));
-		Expression exp2=(Expression)visit(ctx.exp(1));
-		String binop = ctx.op.getText();
-		BinOp op = switch(binop){
-			case "+" -> BinOp.ADD;
-			case "-" -> BinOp.MIN;
-			case "*" -> BinOp.MULT;
-			case "<" -> BinOp.LT;
-			case "<=" -> BinOp.LEQ;
-			case ">=" -> BinOp.GEQ;
-			case ">" -> BinOp.GT;
-			case "&&" -> BinOp.AND;
-			case "==" -> BinOp.EQ;
-			case "!=" -> BinOp.NEQ;
-			case "||" -> BinOp.OR;
-			case "/" -> BinOp.DIV;
-			default -> throw new IllegalStateException("Unexpected value");
-		};
-		return new ExpBin(position(ctx), exp1,op,exp2);
+	@Override public Node visitExp(sdmParser.ExpContext ctx) {
+		return visit(ctx.logicOrExp());
 	}
+
+	@Override public Node visitLogicOrExp(sdmParser.LogicOrExpContext ctx) {
+		Expression left = (Expression) visit(ctx.logicAndExp(0));
+		for (int i = 1; i < ctx.logicAndExp().size(); i++) {
+			Expression right = (Expression) visit(ctx.logicAndExp(i));
+			left = new ExpBin(position(ctx), left, BinOp.OR, right);
+		}
+		return left;
+	}
+
+	@Override public Node visitLogicAndExp(sdmParser.LogicAndExpContext ctx) {
+		Expression left = (Expression) visit(ctx.equalityExp(0));
+		for (int i = 1; i < ctx.equalityExp().size(); i++) {
+			Expression right = (Expression) visit(ctx.equalityExp(i));
+			left = new ExpBin(position(ctx), left, BinOp.AND, right);
+		}
+		return left;
+	}
+
+	@Override public Node visitEqualityExp(sdmParser.EqualityExpContext ctx) {
+		Expression left = (Expression) visit(ctx.relationalExp(0));
+		for (int i = 1; i < ctx.relationalExp().size(); i++) {
+			Expression right = (Expression) visit(ctx.relationalExp(i));
+			String op = ctx.getChild(2*i-1).getText();
+			BinOp bop = op.equals("==") ? BinOp.EQ : BinOp.NEQ;
+			left = new ExpBin(position(ctx), left, bop, right);
+		}
+		return left;
+	}
+
+	@Override public Node visitRelationalExp(sdmParser.RelationalExpContext ctx) {
+		Expression left = (Expression) visit(ctx.addExp(0));
+		for (int i = 1; i < ctx.addExp().size(); i++) {
+			Expression right = (Expression) visit(ctx.addExp(i));
+			String op = ctx.getChild(2*i-1).getText();
+			BinOp bop;
+			switch (op) {
+				case "<": bop = BinOp.LT; break;
+				case "<=": bop = BinOp.LEQ; break;
+				case ">": bop = BinOp.GT; break;
+				case ">=": bop = BinOp.GEQ; break;
+				default: throw new IllegalStateException("Unexpected operator " + op);
+			}
+			left = new ExpBin(position(ctx), left, bop, right);
+		}
+		return left;
+	}
+
+	@Override public Node visitAddExp(sdmParser.AddExpContext ctx) {
+		Expression left = (Expression) visit(ctx.mulExp(0));
+		for (int i = 1; i < ctx.mulExp().size(); i++) {
+			Expression right = (Expression) visit(ctx.mulExp(i));
+			String op = ctx.getChild(2*i-1).getText();
+			BinOp bop = op.equals("+") ? BinOp.ADD : BinOp.MIN;
+			left = new ExpBin(position(ctx), left, bop, right);
+		}
+		return left;
+	}
+
+	@Override public Node visitMulExp(sdmParser.MulExpContext ctx) {
+		Expression left = (Expression) visit(ctx.unaryExp(0));
+		for (int i = 1; i < ctx.unaryExp().size(); i++) {
+			Expression right = (Expression) visit(ctx.unaryExp(i));
+			String op = ctx.getChild(2*i-1).getText();
+			BinOp bop = op.equals("*") ? BinOp.MULT : BinOp.DIV;
+			left = new ExpBin(position(ctx), left, bop, right);
+		}
+		return left;
+	}
+
 	@Override public Node visitExUnop(sdmParser.ExUnopContext ctx) { 
-		Expression exp=(Expression)visit(ctx.exp());
+		Expression exp=(Expression)visit(ctx.unaryExp());
 		String unop=ctx.op.getText();
 		UnOp op = switch(unop){
 			case "!" -> UnOp.NOT;
@@ -253,7 +299,17 @@ public class AstBuild extends parser.sdmBaseVisitor<Node> implements parser.sdmV
 		return new ExpUn(position(ctx), exp, op);
 	}
 
+	@Override public Node visitExPostfix(sdmParser.ExPostfixContext ctx) {
+		return visit(ctx.postfixExp());
+	}
 
-
+	@Override public Node visitPostfixExp(sdmParser.PostfixExpContext ctx) {
+		Expression result = (Expression) visit(ctx.primaryExp());
+		for (sdmParser.ExpContext indexCtx : ctx.exp()) {
+			Expression index = (Expression) visit(indexCtx);
+			result = new ExpTabElt(position(ctx), result, index);
+		}
+		return result;
+	}
 
 }

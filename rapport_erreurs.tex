@@ -1,0 +1,180 @@
+\documentclass[a4paper,11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{enumitem}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+
+\title{Rapport des erreurs rencontrées et des résolutions}
+\author{}
+\date{16 avril 2026}
+
+\begin{document}
+\maketitle
+
+\section*{Introduction}
+Ce rapport décrit de manière ciblée toutes les erreurs rencontrées lors de l'implémentation du compilateur SDM vers MIPS, ainsi que les corrections apportées pour chacune d'elles.
+
+\section{Erreurs de génération de parser et grammaire}
+\begin{enumerate}[label=\arabic*)]
+  \item \textbf{Erreur ANTLR : alternatives non labellisées dans \texttt{unaryExp}}.
+  \begin{itemize}
+    \item Contexte : la règle de grammaire \texttt{unaryExp} contenait des alternatives mixtes, ce qui a empêché ANTLR de générer le parser.
+    \item Résolution : la règle a été corrigée en labellisant explicitement l'alternative suffixe avec \texttt{#exPostfix}. La grammaire est maintenant :
+    \begin{verbatim}
+unaryExp : op=('!'|'-') unaryExp #exUnop
+        | postfixExp #exPostfix
+    ;
+    \end{verbatim}
+    \item Impact : le parser ANTLR a pu être régénéré sans erreur et le nouveau modèle d'expressions a été accepté.
+  \end{itemize}
+
+  \item \textbf{Erreur de grammaire : priorité des opérateurs incorrecte pour les expressions tableaux}.
+  \begin{itemize}
+    \item Contexte : la grammaire initiale ne séparait pas correctement les niveaux d'expression, ce qui amenait des ambiguïtés pour \texttt{a[0] + a[1]} et d'autres expressions.
+    \item Résolution : implémentation d'une hiérarchie de règles d'expression comportant \texttt{logicOrExp}, \texttt{logicAndExp}, \texttt{equalityExp}, \texttt{relationalExp}, \texttt{addExp}, \texttt{mulExp}, \texttt{unaryExp} et \texttt{postfixExp}.
+    \item Impact : l'indexation de tableau est maintenant traitée comme un opérateur postfixe, ce qui garantit que \texttt{a[0]} est parsé avant l'addition.
+  \end{itemize}
+\end{enumerate}
+
+\section{Erreurs d'AST et correspondance avec le parse tree}
+\begin{enumerate}[label=\arabic*)]
+  \item \textbf{Visiteurs AST manquants pour les nouvelles règles d'expression}.
+  \begin{itemize}
+    \item Contexte : \texttt{AstBuild.java} utilisait des méthodes basées sur l'ancienne grammaire (\texttt{visitExBinop}, \texttt{visitExTabElt}) qui n'existaient plus dans le parse tree régénéré.
+    \item Résolution : ajout des visiteurs suivants : \texttt{visitExp}, \texttt{visitLogicOrExp}, \texttt{visitLogicAndExp}, \texttt{visitEqualityExp}, \texttt{visitRelationalExp}, \texttt{visitAddExp}, \texttt{visitMulExp}, \texttt{visitExPostfix}, et \texttt{visitPostfixExp}.
+    \item Impact : l'AST est désormais construit correctement pour toutes les expressions, y compris les indexations de tableau et les opérations binaires.
+  \end{itemize}
+
+  \item \textbf{Erreur de fin de fichier dans \texttt{AstBuild.java}}.
+  \begin{itemize}
+    \item Contexte : une modification antérieure avait laissé la classe sans accolade de fermeture à la fin du fichier.
+    \item Résolution : ajout de la fermeture manquante \texttt{}} à la fin de la classe.
+    \item Impact : le fichier compile à nouveau correctement.
+  \end{itemize}
+\end{enumerate}
+
+\section{Erreurs de typage et sémantique}
+\begin{enumerate}[label=\arabic*)]
+  \item \textbf{Erreur de typage sur l'indexation de tableau non-tableau}.
+  \begin{itemize}
+    \item Contexte : l'expression d'indexation devait vérifier que l'opérande gauche est bien un tableau.
+    \item Résolution : dans \texttt{TypeChecker.java}, \texttt{visit(ExpTabElt)} a été mis à jour pour :
+    \begin{itemize}
+      \item vérifier que \texttt{tabType} est une instance de \texttt{TypeTab},
+      \item vérifier que l'indice est un \texttt{int},
+      \item renvoyer le type d'élément du tableau.
+    \end{itemize}
+    \item Impact : les expressions comme \texttt{a[0]} sont maintenant typées correctement et les erreurs sont détectées tôt.
+  \end{itemize}
+
+  \item \textbf{Erreur de typage de la taille de tableau non entière}.
+  \begin{itemize}
+    \item Contexte : la taille passée à \texttt{new type[exp]} devait être un entier.
+    \item Résolution : dans \texttt{TypeChecker.java}, \texttt{visit(ExpNewTab)} vérifie que \texttt{taille} a bien le type \texttt{int}.
+    \item Impact : les allocations de tableau invalides sont rejetées correctement.
+  \end{itemize}
+
+  \item \textbf{Erreur d'affectation d'élément de tableau avec type incompatible}.
+  \begin{itemize}
+    \item Contexte : il fallait s'assurer que la valeur assignée à \texttt{a[i]} correspond au type des éléments du tableau.
+    \item Résolution : dans \texttt{TypeChecker.java}, \texttt{visit(StatAffTab)} compare le type de \texttt{lhs} à celui de l'expression de droite.
+    \item Impact : les assignments invalides comme \texttt{a[0] = true} où \texttt{a} est \texttt{int[]} sont signalés.
+  \end{itemize}
+
+  \item \textbf{Erreur : mots réservés utilisés comme identificateurs}.
+  \begin{itemize}
+    \item Contexte : des noms comme \texttt{int}, \texttt{boolean} ou \texttt{print} pouvaient être employés comme identifiants.
+    \item Résolution : dans \texttt{TableBuilder.java}, ajout d'un ensemble de mots réservés et vérification sur les déclarations de variables, méthodes et paramètres.
+    \item Impact : ces cas génèrent une erreur sémantique explicite plutôt qu'un comportement indéfini.
+  \end{itemize}
+
+  \item \textbf{Erreur de retour de fonction non conforme}.
+  \begin{itemize}
+    \item Contexte : certaines fonctions pouvaient ne pas retourner de valeur ou retourner un type différent de celui déclaré.
+    \item Résolution : dans \texttt{TypeChecker.java}, la méthode \texttt{visit(MethodDecl)} vérifie que toutes les branches renvoient une valeur et que le type de retour correspond au type de la méthode.
+    \item Impact : les méthodes mal typées sont détectées et signalées.
+  \end{itemize}
+
+  \item \textbf{Erreur de traitement des warnings}.
+  \begin{itemize}
+    \item Contexte : le code contenait un TODO pour les warnings et ne traitait pas correctement les avertissements.
+    \item Résolution : ajout d'un second objet \texttt{Errors} pour les warnings dans \texttt{TypeChecker.java}, affichage des warnings sans interrompre la compilation, puis arrêt uniquement en cas d'erreurs.
+    \item Impact : les avertissements sont désormais visibles mais non bloquants.
+  \end{itemize}
+\end{enumerate}
+
+\section{Erreurs de backend IR et génération MIPS}
+\begin{enumerate}[label=\arabic*)]
+  \item \textbf{Erreur de conflit de type \texttt{Byte}}.
+  \begin{itemize}
+    \item Contexte : la classe \texttt{ir.expr.Byte} entrait en collision avec \texttt{java.lang.Byte} lors de la compilation.
+    \item Résolution : utilisation du nom de classe qualifié \texttt{ir.expr.Byte} si nécessaire, et import correct dans \texttt{Translate.java} et \texttt{Expression.java}.
+    \item Impact : le backend IR compile sans conflit de nom.
+  \end{itemize}
+
+  \item \textbf{Erreur de traduction des accès tableau en IR}.
+  \begin{itemize}
+    \item Contexte : les expressions \texttt{ExpTabElt} devaient être traduites en lecture mémoire IR.
+    \item Résolution : ajout de \texttt{ReadMem} dans \texttt{ir/expr/} et de la logique de traduction dans \texttt{Translate.java}.
+    \item Impact : les accès \texttt{a[i]} sont correctement représentés en IR.
+  \end{itemize}
+
+  \item \textbf{Erreur de traduction des écritures tableau en IR}.
+  \begin{itemize}
+    \item Contexte : l'affectation d'élément \texttt{a[i] = expr} nécessitait une commande IR dédiée.
+    \item Résolution : ajout de \texttt{WriteMem} dans \texttt{ir/com/} et d'une traduction spécifique dans \texttt{Translate.java}.
+    \item Impact : les affectations de tableau sont prises en charge correctement.
+  \end{itemize}
+
+  \item \textbf{Erreur de génération MIPS pour l'allocation de tableau}.
+  \begin{itemize}
+    \item Contexte : le code MIPS devait allouer dynamiquement une zone mémoire pour un tableau.
+    \item Résolution : implémentation de \texttt{NewArray} dans \texttt{mips/Expression.java} utilisant \texttt{syscall 9} et multiplication par 4 pour la taille des entiers.
+    \item Impact : \texttt{new int[n]} produit désormais une zone mémoire valide en MIPS.
+  \end{itemize}
+
+  \item \textbf{Erreur de génération MIPS pour l'accès mémoire tableau}.
+  \begin{itemize}
+    \item Contexte : la lecture d'un élément de tableau nécessitait le calcul de l'adresse de base à partir de l'indice.
+    \item Résolution : implémentation de \texttt{ReadMem} dans \texttt{mips/Expression.java} et de l'adresse dans \texttt{Command.java}, avec décalage \texttt{sll} et \texttt{addu}.
+    \item Impact : l'accès à \texttt{a[i]} est généré correctement en MIPS.
+  \end{itemize}
+
+  \item \textbf{Erreur de génération MIPS pour l'écriture mémoire de tableau}.
+  \begin{itemize}
+    \item Contexte : lors de l'écriture d'un élément de tableau, il fallait empiler base, indice et valeur avant le calcul de l'adresse.
+    \item Résolution : implémentation de \texttt{WriteMem} dans \texttt{mips/Command.java} pour dépiler base, indice, valeur puis écrire avec \texttt{sw}.
+    \item Impact : les affectations \texttt{a[i] = expr} sont correctement traduites en assembleur.
+  \end{itemize}
+\end{enumerate}
+
+\section{Erreurs de compilation et correction de sources}
+\begin{enumerate}[label=\arabic*)]
+  \item \textbf{Erreur  : fichiers ANTLR et runtime non trouvés lors de la compilation}.
+  \begin{itemize}
+    \item Contexte : le script de compilation attendait \texttt{/usr/local/lib/antlr-4.13.2-complete.jar}, mais le jar disponible était \texttt{antlr-4.13.1-complete.jar}.
+    \item Résolution : adaptation temporaire du chemin de classpath pour utiliser le jar installé, ou installation du bon jar dans le dossier attendu.
+    \item Impact : le projet compile correctement une fois le bon runtime ANTLR accessible.
+  \end{itemize}
+
+  \item \textbf{Erreur : classes parser non trouvées lors de la compilation Java}.
+  \begin{itemize}
+    \item Contexte : les sources générées par ANTLR avaient besoin de la déclaration de package \texttt{parser}, mais les fichiers Java du parser n'avaient pas toujours cette déclaration.
+    \item Résolution : ajout d'un traitement pour préfixer \texttt{package parser;} dans les fichiers générés ou bien génération ANTLR avec l'option \texttt{-package parser}.
+    \item Impact : la compilation Java inclut désormais correctement le package \texttt{parser} et les imports de \texttt{AstBuild.java} fonctionnent.
+  \end{itemize}
+
+  \item \textbf{Erreur de variable dupliquée dans \texttt{TableBuilder.java}}.
+  \begin{itemize}
+    \item Contexte : une variable \texttt{id} était utilisée deux fois dans le même bloc, ce qui créait une confusion locale.
+    \item Résolution : renommage interne de la variable à usage différent, par exemple \texttt{methodName}, pour éviter le conflit.
+    \item Impact : le code compile sans erreur de portée ni de collision de variable locale.
+  \end{itemize}
+\end{enumerate}
+
+\section*{Conclusion}
+Ce rapport couvre l'ensemble des erreurs rencontrées pendant l'implémentation du support des tableaux et du backend MIPS, ainsi que les corrections apportées pour résoudre chaque problème. La chaîne complète du compilateur a été stabilisée grâce à ces résolutions.
+
+\end{document}

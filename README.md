@@ -4,7 +4,7 @@ Ce projet implémente un compilateur pour un langage SDM simple. Il couvre l'ana
 
 ## Structure du projet
 
-- `sdmips/sdm.g4` : grammaire ANTLR du langage SDM
+- `sdmips/sdm.g4` : grammaire ANTLR du langage SDM, incluant le support des tableaux
 - `sdmips/main/Main.java` : point d'entrée principal du compilateur
 - `sdmips/ast/` : construction de l'arbre syntaxique abstrait (AST)
 - `sdmips/semantic/` : analyse sémantique, tables de symboles et vérification des types
@@ -71,6 +71,7 @@ Les exemples de tests se trouvent dans `sdmips/tests/` :
 - `tests/test.sdm`
 - `tests/unit.sdm`
 - `tests/funs.sdm`
+- `tests/array.sdm` (exemple de tableaux et d'indexation)
 
 Testez-les en redirigeant leur contenu vers `main.Main`.
 
@@ -82,5 +83,11 @@ Testez-les en redirigeant leur contenu vers `main.Main`.
   3. Vérification sémantique
   4. Traduction en IR
   5. Génération de code MIPS
+
+- Le compilateur prend maintenant en charge les tableaux SDM :
+  - types `int[]` et `boolean[]`
+  - allocation avec `new type[expression]`
+  - accès par `identificateur[index]`
+  - affectation d'éléments de tableau
 
 - Le projet contient aussi un rapport détaillé des modifications sous `rapport_modifications.tex`.
